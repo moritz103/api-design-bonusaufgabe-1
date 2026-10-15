@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <title>Beschreibung Abgabe Bonusaufgabe 1</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg: #fbfbf9; --fg: #1d1d1b; --muted: #5d5d58; --line: #dcdcd5; --card: #ffffff;
+            --accent: #2f5d8a; --code-bg: #f1f1ec; --warn: #a86400; --crit: #b3261e; --ok: #2e7d32;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #17181a; --fg: #e6e6e1; --muted: #a2a29b; --line: #34363a; --card: #1f2023;
+                    --accent: #7fb0e0; --code-bg: #26282c; --warn: #e0a040; --crit: #ef7a72; --ok: #7cc47f; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--fg);
+               font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+        main { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+        h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 4px; }
+        h2 { font-size: 1.35rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+        h3 { font-size: 1.08rem; margin: 28px 0 8px; }
+        .sub { color: var(--muted); margin: 0 0 24px; }
+        code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; }
+        code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+        pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.45; }
+        pre code { background: none; padding: 0; }
+        .table-wrap { overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: .94rem; }
+        th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+        th { color: var(--muted); font-weight: 600; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+        .card h3 { margin-top: 0; }
+        .note { border-left: 3px solid var(--accent); background: var(--card); padding: 10px 14px; border-radius: 0 8px 8px 0; }
+        .warn { color: var(--warn); font-weight: 600; } .crit { color: var(--crit); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; }
+        figure { margin: 16px 0; }
+        figure svg { width: 100%; height: auto; display: block; }
+        figcaption { color: var(--muted); font-size: .88rem; margin-top: 6px; }
+        svg text { fill: var(--fg); font: 12px system-ui, sans-serif; }
+        svg .small { font-size: 10.5px; fill: var(--muted); }
+        svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+        svg .ex { fill: var(--code-bg); stroke: var(--accent); stroke-width: 1.5; }
+        svg .q { fill: var(--card); stroke: var(--fg); stroke-width: 1.2; }
+        svg .arrow { stroke: var(--muted); stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+        svg .dl { stroke: var(--crit); stroke-dasharray: 5 4; }
+        svg .mon { stroke: var(--ok); stroke-dasharray: 2 3; }
+        ol.qa li { margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+<main>
+
+<h1>Echtzeit-Analyse von IoT-Sensordaten mit RabbitMQ</h1>
+<p class="sub">Bonusaufgabe 1 · API-Design und Systemintegration · Python 3, Pika 1.4, RabbitMQ 4.3</p>
+
+<p>Simulierte Sensoren (Temperatur, Luftfeuchtigkeit, Vibration) senden Messwerte als JSON an RabbitMQ.
+Zwei Analyse-Consumer erhalten über das Routing nur „ihre“ Sensordaten, aggregieren sie in 10-Sekunden-Fenstern
+und erzeugen bei Anomalien priorisierte Alarme. Ein Alarm-Consumer verarbeitet Alarme nach Priorität,
+ein Monitoring-Consumer wertet Metrik-Events aller Komponenten aus, und eine Dead Letter Queue sammelt
+alles, was nicht verarbeitet werden kann. Ziel war eine nachvollziehbar begründete, robuste Lösung, nicht möglichst viele Features.</p>
+
+<h2>1. Architektur und Nachrichtenfluss</h2>
+
+<figure>
+<svg viewBox="0 0 880 470" role="img" aria-label="Architekturdiagramm">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="fill: var(--muted)"/></marker></defs>
+
+    <!-- Producer -->
+    <rect class="box" x="10" y="40" width="172" height="44" rx="8"/><text x="22" y="60">Producer Temperatur</text><text class="small" x="22" y="75">sensor.temperature.temp-01</text>
+    <rect class="box" x="10" y="100" width="172" height="44" rx="8"/><text x="22" y="120">Producer Feuchte</text><text class="small" x="22" y="135">sensor.humidity.humi-01</text>
+    <rect class="box" x="10" y="160" width="172" height="44" rx="8"/><text x="22" y="180">Producer Vibration</text><text class="small" x="22" y="195">sensor.vibration.vibr-01</text>
+
+    <!-- sensor.data topic -->
+    <rect class="ex" x="215" y="95" width="105" height="54" rx="27"/><text x="236" y="118">sensor.data</text><text class="small" x="253" y="133">topic</text>
+    <path class="arrow" d="M182,62 L218,110"/><path class="arrow" d="M182,122 L215,122"/><path class="arrow" d="M182,182 L218,134"/>
+
+    <!-- analysis queues -->
+    <rect class="q" x="370" y="55" width="160" height="50" rx="4"/><text x="380" y="75">q.analysis.climate</text><text class="small" x="380" y="91">quorum · TTL 60 s · limit 3</text>
+    <rect class="q" x="370" y="145" width="160" height="50" rx="4"/><text x="380" y="165">q.analysis.vibration</text><text class="small" x="380" y="181">quorum · TTL 60 s · limit 3</text>
+    <path class="arrow" d="M320,112 L370,82"/><text class="small" x="290" y="46">temperature.* · humidity.*</text>
+    <path class="arrow" d="M320,132 L370,168"/><text class="small" x="300" y="210">vibration.*</text>
+
+    <!-- analyzers -->
+    <rect class="box" x="580" y="55" width="140" height="50" rx="8"/><text x="592" y="75">Analyzer Klima</text><text class="small" x="592" y="91">Ø/Median/Min/Max 10 s</text>
+    <rect class="box" x="580" y="145" width="140" height="50" rx="8"/><text x="592" y="165">Analyzer Vibration</text><text class="small" x="592" y="181">Aggregation 10 s</text>
+    <path class="arrow" d="M530,80 L580,80"/><path class="arrow" d="M530,170 L580,170"/>
+
+    <!-- alarms -->
+    <rect class="ex" x="585" y="250" width="130" height="54" rx="27"/><text x="628" y="273">alarms</text><text class="small" x="633" y="288">direct</text>
+    <path class="arrow" d="M650,105 C690,150 690,210 660,250"/><path class="arrow" d="M650,195 L650,250"/>
+    <text class="small" x="700" y="230">warning / critical</text>
+    <rect class="q" x="400" y="252" width="130" height="50" rx="4"/><text x="410" y="272">q.alarms</text><text class="small" x="410" y="288">x-max-priority 10</text>
+    <path class="arrow" d="M585,277 L530,277"/>
+    <rect class="box" x="220" y="252" width="140" height="50" rx="8"/><text x="232" y="272">Alarm-Consumer</text><text class="small" x="232" y="288">prefetch 1</text>
+    <path class="arrow" d="M400,277 L360,277"/>
+
+    <!-- DLX / DLQ -->
+    <rect class="ex" x="400" y="370" width="110" height="50" rx="25"/><text x="440" y="392">dlx</text><text class="small" x="436" y="407">fanout</text>
+    <rect class="q" x="220" y="370" width="130" height="50" rx="4"/><text x="230" y="390">q.dlq</text><text class="small" x="230" y="406">→ DLQ-Consumer</text>
+    <path class="arrow dl" d="M530,98 H550 V395 H512"/>
+    <path class="arrow dl" d="M530,188 H550"/>
+    <path class="arrow dl" d="M455,302 V370"/>
+    <path class="arrow dl" d="M400,395 L350,395"/>
+    <text class="small" x="560" y="430" style="fill: var(--crit)">rejected · expired · delivery_limit</text>
+
+    <!-- monitoring -->
+    <rect class="ex" x="770" y="250" width="100" height="54" rx="27"/><text x="785" y="273">monitoring</text><text class="small" x="803" y="288">fanout</text>
+    <rect class="q" x="760" y="370" width="115" height="50" rx="4"/><text x="768" y="390">q.monitoring</text><text class="small" x="768" y="406">→ Monitoring</text>
+    <path class="arrow mon" d="M720,80 C800,90 820,180 820,250"/>
+    <path class="arrow mon" d="M720,170 C770,180 800,210 812,250"/>
+    <path class="arrow mon" d="M290,252 C300,215 700,225 780,262"/>
+    <path class="arrow mon" d="M820,304 L820,370"/>
+    <text class="small" x="745" y="40" style="fill: var(--ok)">Metrik-Events aller</text><text class="small" x="745" y="53" style="fill: var(--ok)">Komponenten</text>
+</svg>
+<figcaption>Durchgezogen: Datenfluss · rot gestrichelt: Dead-Lettering · grün gepunktet: Metrik-Events (auch Producer und DLQ-Consumer senden Events).</figcaption>
+</figure>
+
+<h3>Nachrichtenformat</h3>
+<pre><code>{"sensor_id": "temp-01", "timestamp": "2026-10-14T18:53:30.123+00:00",
+ "type": "temperature", "value": 64.2, "unit": "°C"}</code></pre>
+<p>Routing Key: <code>sensor.&lt;typ&gt;.&lt;sensor_id&gt;</code>. Producer senden mit <code>delivery_mode=2</code> (persistent),
+<code>mandatory=True</code> und Publisher Confirms.</p>
+
+<h2>2. Exchanges und Queues</h2>
+<div class="table-wrap"><table>
+    <tr><th>Exchange</th><th>Typ</th><th>Begründung</th><th>Alternative</th></tr>
+    <tr><td><code>sensor.data</code></td><td>topic</td>
+        <td>Filterung im Broker über Wildcards: <code>sensor.temperature.*</code> + <code>sensor.humidity.*</code> → Klima,
+            <code>sensor.vibration.*</code> → Vibration. Neue Analysedienste (z. B. alle Daten eines Sensors: <code>sensor.*.temp-01</code>) brauchen nur ein neues Binding, die Producer bleiben unverändert.</td>
+        <td><b>direct</b> mit Key = Sensortyp: reicht für Typ-Filterung, aber keine Filterung nach Sensor-ID oder Gruppen ohne viele Einzel-Bindings. <b>headers</b>: flexibler, aber schwerer nachvollziehbar und langsamer.</td></tr>
+    <tr><td><code>alarms</code></td><td>direct</td>
+        <td>Die Severity-Menge ist fest und klein (<code>warning</code>, <code>critical</code>). Beide Keys zeigen auf eine Priority Queue; später kann z. B. eine eigene SMS-Queue nur an <code>critical</code> gebunden werden.</td>
+        <td><b>Zwei Queues</b> (je Severity) statt Priorität: Bevorzugung müsste dann im Consumer gelöst werden. <b>topic</b>: hier ohne Mehrwert.</td></tr>
+    <tr><td><code>monitoring</code></td><td>fanout</td>
+        <td>Jede Komponente sendet Events ohne Routing-Logik; beliebig viele Abnehmer (Konsole, später Dashboard/Datenbank) hängen sich per Binding an.</td>
+        <td><b>topic</b> mit <code>metrics.&lt;komponente&gt;</code>: sinnvoll, wenn Abnehmer nur Teilmengen wollen.</td></tr>
+    <tr><td><code>dlx</code></td><td>fanout</td>
+        <td>Sammelstelle für alle Dead Letters aller Queues; der ursprüngliche Routing Key bleibt erhalten.</td>
+        <td>Ein DLX/DLQ je Queue: feiner getrennt, aber mehr Topologie.</td></tr>
+</table></div>
+
+<div class="table-wrap"><table>
+    <tr><th>Queue</th><th>Typ</th><th>Argumente</th></tr>
+    <tr><td><code>q.analysis.climate</code>, <code>q.analysis.vibration</code></td><td>quorum</td>
+        <td><code>x-message-ttl=60000</code>, <code>x-dead-letter-exchange=dlx</code>, <code>x-delivery-limit=3</code></td></tr>
+    <tr><td><code>q.alarms</code></td><td>classic</td><td><code>x-max-priority=10</code> (CRITICAL = 9, WARNING = 5), DLX, bewusst <b>keine</b> TTL</td></tr>
+    <tr><td><code>q.monitoring</code>, <code>q.dlq</code></td><td>classic</td><td>durable</td></tr>
+</table></div>
+
+<p class="note"><b>Warum Quorum Queues für die Analyse?</b> Sie sind repliziert und zählen fehlgeschlagene Zustellungen
+selbst (<code>x-delivery-count</code>). Mit <code>x-delivery-limit</code> verhindert der Broker, dass eine fehlerhafte Nachricht
+endlos neu verarbeitet wird – ohne eigenen Retry-Zähler im Code. Alternative bei Classic Queues: Retry-Header
+selbst hochzählen und die Nachricht neu publizieren. Die Alarm-Queue ist classic, weil Quorum Queues nur zwei Prioritätsstufen kennen.</p>
+
+<h3>Message TTL (60 s)</h3>
+<p>Sensordaten sind nur kurz aussagekräftig: eine Temperaturwarnung von vor fünf Minuten hilft niemandem, und nach einem
+Ausfall würde der Rückstau sonst unbegrenzt wachsen. Mit TTL bleibt die Queue bei höchstens ~60 s Daten (im Test ~193 Nachrichten).
+Abgelaufene Nachrichten werden nicht gelöscht, sondern über den DLX in die DLQ geleitet (<code>x-death.reason = expired</code>)
+und sind dort nachvollziehbar. Alarme haben keine TTL: sie dürfen nicht verloren gehen.</p>
+
+<h3>Wege in die DLQ</h3>
+<div class="table-wrap"><table>
+    <tr><th>Grund (<code>x-first-death-reason</code>)</th><th>Mechanismus</th></tr>
+    <tr><td><code>rejected</code></td><td>Consumer: <code>basic_reject(requeue=False)</code> bei ungültigen Nachrichten (permanenter Fehler)</td></tr>
+    <tr><td><code>delivery_limit</code></td><td>Quorum Queue: nach mehr als 3 fehlgeschlagenen Zustellungen (<code>basic_reject(requeue=True)</code> oder Consumer-Absturz)</td></tr>
+    <tr><td><code>expired</code></td><td>Broker: Nachricht älter als 60 s</td></tr>
+</table></div>
+
+<h2>3. Verarbeitung in den Analyse-Consumern</h2>
+<pre><code>1. validate()           JSON, Pflichtfelder, Typ passt zur Queue, value Zahl im plausiblen Bereich
+                        → InvalidMessage   → basic_reject(requeue=False) → DLQ sofort
+2. classify()/Alarm     Schwellwert prüfen, Alarm publizieren und auf Publisher Confirm warten
+                        → ProcessingError  → basic_reject(requeue=True)  → erneut, max. 3×
+3. Aggregationsfenster  Wert übernehmen; Timer gibt alle 10 s Ø/Median/Min/Max aus
+4. basic_ack()          erst jetzt gilt die Nachricht als verarbeitet</code></pre>
+
+<div class="cards">
+    <div class="card"><h3>Anomalie-Schwellwerte</h3>
+        Temperatur: <span class="warn">&gt; 80 °C WARNING</span>, <span class="crit">&gt; 100 °C CRITICAL</span><br>
+        Luftfeuchte: <span class="warn">&gt; 85 % WARNING</span>, <span class="crit">&gt; 95 % CRITICAL</span><br>
+        Vibration: <span class="warn">&gt; 7 mm/s WARNING</span>, <span class="crit">&gt; 11 mm/s CRITICAL</span></div>
+    <div class="card"><h3>Priorisierung</h3>
+        Alarme tragen <code>priority</code> 9 bzw. 5. Der Alarm-Consumer nutzt <code>prefetch_count=1</code>, damit der Broker
+        jedes Mal neu nach Priorität auswählen kann. Test: 10 WARNING, danach 3 CRITICAL gesendet → die 3 CRITICAL werden zuerst verarbeitet.</div>
+    <div class="card"><h3>Producer-Retry</h3>
+        Bei <code>AMQPConnectionError</code>/<code>AMQPChannelError</code>: Reconnect mit Exponential Backoff
+        1 → 2 → 4 → 8 → 10 s (gedeckelt), maximal 5 Wiederholungen, dann Abbruch. Nicht routbare Nachrichten werden nicht wiederholt.</div>
+</div>
+
+<p class="note"><b>Erkenntnis aus dem Test:</b> Zunächst wurden Verarbeitungsfehler mit <code>basic_nack(requeue=True)</code> behandelt –
+die Poison Message lief in eine Endlosschleife (&gt; 30 000 Zustellungen in Sekunden). Seit RabbitMQ 4.3 erhöht nur
+<code>basic.reject</code> („Verarbeitung fehlgeschlagen“) den delivery-count, <code>basic.nack</code> („nicht verarbeitet“) nicht.
+Mit <code>basic_reject(requeue=True)</code> greift das Limit.</p>
+
+<h2>4. Monitoring</h2>
+<p>Alle Komponenten publizieren Events (<code>processed</code>, <code>failed</code>, <code>alarm</code>, <code>alarm_handled</code>,
+<code>aggregate</code>, <code>dead_lettered</code>, <code>publish_retry</code>) an den fanout-Exchange <code>monitoring</code>.
+Der Monitoring-Consumer kennt nur diese Events und fragt zusätzlich per passivem <code>queue_declare</code> die Queue-Längen
+beim Broker ab – er greift nie auf den Speicher anderer Prozesse zu. Monitoring-Events sind bewusst transient und ohne Confirm:
+ein Monitoring-Ausfall darf die Verarbeitung nicht bremsen.</p>
+<pre><code>Verarbeitete Nachrichten : 1687
+  je Sensortyp           : humidity=568, temperature=582, vibration=537
+Anomalien / Alarme       : 268 (CRITICAL=88, WARNING=180)
+Fehlgeschlagen           : 3 (invalid=3)
+In DLQ eingegangen       : 35 (delivery_limit=1, expired=31, rejected=3)
+Producer-Wiederholungen  : 1
+Verarbeitungszeit        : Ø 0.62 ms, max 14.30 ms
+Queues: q.analysis.climate=0 msg/1 cons  q.analysis.vibration=0 msg/1 cons ...</code></pre>
+
+<h2>5. Resilienztests</h2>
+<p>Alle Szenarien sind gezielt auslösbar (Kommandozeilen-Flags bzw. <code>tools/inject.py</code>) und wurden gegen RabbitMQ 4.3.6 durchgespielt.</p>
+
+<h3>5.1 Consumer-Ausfall während der Verarbeitung</h3>
+<p><code>python analyzer_climate.py --crash-after 5</code>, danach normal neu starten.</p>
+<ol class="qa">
+    <li><b>Auslöser:</b> <code>os._exit(1)</code> bei der 5. Nachricht, nach der Validierung, vor dem ACK.</li>
+    <li><b>Nachricht:</b> ausgeliefert, aber unbestätigt; beim Verbindungsabbruch legt der Broker alle unbestätigten Nachrichten (bis prefetch 10) zurück.</li>
+    <li><b>ACK/NACK:</b> keins – der Broker erkennt den Verbindungsabbruch.</li>
+    <li><b>Erneute Zustellung:</b> ja – <code>OK temperature temp-01 60.40°C (Zustellung #2, redelivered)</code>.</li>
+    <li><b>Fehlerbehandlung:</b> ACK erst nach vollständiger Verarbeitung → At-least-once, kein Verlust.</li>
+    <li><b>DLQ:</b> wenn dieselbe Nachricht den Consumer mehr als 3× abstürzen lässt (<code>delivery_limit</code>) oder er länger als 60 s fehlt (<code>expired</code>).</li>
+    <li><b>Weiterarbeit:</b> <span class="ok">ja</span>, der Rückstau wird abgearbeitet.</li>
+</ol>
+
+<h3>5.2 Ungültige Nachricht</h3>
+<p><code>python -m tools.inject bad-value</code> (ebenso <code>invalid-json</code>, <code>missing-field</code>).</p>
+<ol class="qa">
+    <li><b>Auslöser:</b> <code>"value": "heiß"</code>, abgeschnittenes JSON oder fehlendes Pflichtfeld.</li>
+    <li><b>Nachricht:</b> <code>validate()</code> erkennt einen permanenten Fehler.</li>
+    <li><b>ACK/NACK:</b> <code>basic_reject(requeue=False)</code>.</li>
+    <li><b>Erneute Zustellung:</b> nein, sie wäre sinnlos.</li>
+    <li><b>Fehlerbehandlung:</b> Unterscheidung permanent/temporär; Event <code>failed/invalid</code> ans Monitoring.</li>
+    <li><b>DLQ:</b> sofort – <code>DLQ grund=rejected queue=q.analysis.climate</code>.</li>
+    <li><b>Weiterarbeit:</b> <span class="ok">ja</span>.</li>
+</ol>
+
+<h3>5.3 Verarbeitungsfehler (Poison Message)</h3>
+<p><code>python analyzer_climate.py --fail-on-poison</code> + <code>python -m tools.inject poison</code>.</p>
+<ol class="qa">
+    <li><b>Auslöser:</b> gültige Nachricht mit <code>"poison": true</code> → <code>ProcessingError</code>.</li>
+    <li><b>Nachricht:</b> als temporärer Fehler zurück in die Queue.</li>
+    <li><b>ACK/NACK:</b> <code>basic_reject(requeue=True)</code>.</li>
+    <li><b>Erneute Zustellung:</b> ja, <code>x-delivery-count</code> 1 → 2 → 3.</li>
+    <li><b>Fehlerbehandlung:</b> Quorum Queue begrenzt die Versuche (<code>x-delivery-limit=3</code>).</li>
+    <li><b>DLQ:</b> beim 4. Fehlversuch – <code>DLQ grund=delivery_limit</code>.</li>
+    <li><b>Weiterarbeit:</b> <span class="ok">ja</span>, andere Nachrichten laufen normal weiter.</li>
+</ol>
+
+<h3>5.4 TTL-Ablauf</h3>
+<p>Vibrations-Analyzer stoppen, Producer laufen lassen, &gt; 60 s warten.</p>
+<ol class="qa">
+    <li><b>Auslöser:</b> kein Consumer an <code>q.analysis.vibration</code>.</li>
+    <li><b>Nachricht:</b> wartet in der Queue, bis die TTL abläuft.</li>
+    <li><b>ACK/NACK:</b> keins – der Broker entfernt sie.</li>
+    <li><b>Erneute Zustellung:</b> nein.</li>
+    <li><b>Fehlerbehandlung:</b> veraltete Daten werden nicht mehr analysiert, der Rückstau bleibt begrenzt.</li>
+    <li><b>DLQ:</b> <code>DLQ grund=expired queue=q.analysis.vibration</code>.</li>
+    <li><b>Weiterarbeit:</b> <span class="ok">ja</span>, nach Neustart nur aktuelle Daten.</li>
+</ol>
+
+<h3>5.5 Netzwerkunterbrechung des Producers</h3>
+<p><code>rabbitmqctl close_connection "&lt;pid&gt;" "Netzwerktest"</code>; vollständiger Backoff: <code>RABBIT_PORT=5999 python producer.py</code>.</p>
+<ol class="qa">
+    <li><b>Auslöser:</b> Verbindung wird getrennt bzw. Broker ist nicht erreichbar.</li>
+    <li><b>Nachricht:</b> ohne Publisher Confirm gilt sie als nicht zugestellt und wird erneut gesendet.</li>
+    <li><b>ACK/NACK:</b> Publisher Confirm vom Broker; fehlt es, sendet der Producer erneut.</li>
+    <li><b>Erneute Zustellung:</b> ja – <code>Publish fehlgeschlagen (ConnectionClosedByBroker) - Wiederholung 1/5 in 1 s</code>.</li>
+    <li><b>Fehlerbehandlung:</b> Backoff 1/2/4/8/10 s, nach 5 Wiederholungen Abbruch mit Exit-Code 1.</li>
+    <li><b>DLQ:</b> nicht betroffen – die Nachricht hat den Broker nie erreicht.</li>
+    <li><b>Weiterarbeit:</b> <span class="ok">ja</span>, nach dem Reconnect.</li>
+</ol>
+
+<h2>6. Fazit, Grenzen und Verbesserungen</h2>
+<ul>
+    <li><b>At-least-once statt exactly-once:</b> nach Absturz oder erneutem Senden sind Duplikate möglich (ein Alarm könnte doppelt entstehen). Verbesserung: idempotente Verarbeitung über <code>sensor_id + timestamp</code> bzw. <code>alarm_id</code>.</li>
+    <li><b>Aggregationsfenster im Speicher:</b> bei einem Absturz geht das laufende Fenster verloren (die Nachrichten sind schon bestätigt). Verbesserung: Fensterergebnisse als Nachricht persistieren oder erst am Fensterende bestätigen.</li>
+    <li><b>Kein Retry-Delay im Consumer:</b> Requeue erfolgt sofort. Verbesserung: Retry-Queue mit TTL (Delayed Retry) für echte temporäre Fehler.</li>
+    <li><b>Producer ohne Puffer:</b> nach 5 Fehlversuchen bricht er ab. Verbesserung: lokaler Puffer bzw. Store-and-Forward.</li>
+    <li><b>Versionsabhängigkeit:</b> die nack/reject-Semantik hat sich in RabbitMQ 4.3 geändert – Fehlerbehandlung muss gegen die eingesetzte Broker-Version getestet werden.</li>
+</ul>
+
+<h2>7. Dateien und Start</h2>
+<div class="table-wrap"><table>
+    <tr><th>Datei</th><th>Inhalt</th></tr>
+    <tr><td><code>common/config.py</code></td><td>Namen, TTL, Delivery-Limit, Schwellwerte, Backoff-Parameter</td></tr>
+    <tr><td><code>common/topology.py</code></td><td>Exchanges, Queues, Bindings (idempotent, von jeder Komponente aufgerufen)</td></tr>
+    <tr><td><code>common/rabbit.py</code></td><td>Verbindung mit Backoff, <code>ReliablePublisher</code>, Consumer-Schleife mit Reconnect</td></tr>
+    <tr><td><code>common/analyzer.py</code></td><td>Validierung, Anomalien, Alarm-Publish, Aggregation, ACK/REJECT</td></tr>
+    <tr><td><code>producer.py</code></td><td>Sensor-Simulation</td></tr>
+    <tr><td><code>analyzer_climate.py</code>, <code>analyzer_vibration.py</code></td><td>Analyse-Consumer</td></tr>
+    <tr><td><code>alarm_consumer.py</code>, <code>monitoring_consumer.py</code>, <code>dlq_consumer.py</code></td><td>Alarm-, Monitoring- und DLQ-Consumer</td></tr>
+    <tr><td><code>tools/inject.py</code></td><td>Fehlernachrichten und Alarm-Burst für die Resilienztests</td></tr>
+</table></div>
+<pre><code>python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt &amp;&amp; source .venv/bin/activate
+python monitoring_consumer.py      # je ein Terminal
+python dlq_consumer.py
+python alarm_consumer.py
+python analyzer_climate.py
+python analyzer_vibration.py
+python producer.py --type all --interval 0.5 --anomaly-rate 0.1</code></pre>
+
+</main>
+</body>
+</html>
